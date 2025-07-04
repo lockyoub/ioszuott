@@ -1,0 +1,383 @@
+name: 构建iOS应用 (未签名IPA)
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      build_configuration:
+        description: '构建配置'
+        required: true
+        default: 'Release'
+        type: choice
+        options:
+        - Debug
+        - Release
+
+env:
+  XCODE_VERSION: '15.4'
+  IOS_DEPLOYMENT_TARGET: '15.0'
+  SCHEME_NAME: 'StockTradingApp'
+  CONFIGURATION: ${{ github.event.inputs.build_configuration || 'Release' }}
+
+jobs:
+  build:
+    name: 构建未签名IPA包
+    runs-on: macos-14
+    
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+      
+    - name: 设置Xcode版本
+      uses: maxim-lobanov/setup-xcode@v1
+      with:
+        xcode-version: ${{ env.XCODE_VERSION }}
+        
+    - name: 显示Xcode信息
+      run: |
+        xcodebuild -version
+        xcrun simctl list runtimes
+        
+    - name: 创建Xcode项目结构
+      run: |
+        echo "📁 创建Xcode项目结构..."
+        
+        # 创建项目目录结构
+        mkdir -p StockTradingApp.xcodeproj
+        mkdir -p StockTradingApp/Resources
+        mkdir -p StockTradingApp/Supporting\ Files
+        
+        # 移动源文件到标准项目结构
+        cp -r user_input_files/Models/ StockTradingApp/ 2>/dev/null || echo "Models目录不存在"
+        cp -r user_input_files/Views/ StockTradingApp/ 2>/dev/null || echo "Views目录不存在"
+        cp -r user_input_files/Services/ StockTradingApp/ 2>/dev/null || echo "Services目录不存在"
+        cp -r user_input_files/Utils/ StockTradingApp/ 2>/dev/null || echo "Utils目录不存在"
+        cp -r user_input_files/Performance/ StockTradingApp/ 2>/dev/null || echo "Performance目录不存在"
+        cp -r user_input_files/Foundation/ StockTradingApp/ 2>/dev/null || echo "Foundation目录不存在"
+        cp -r user_input_files/TradingDataModel.xcdatamodeld/ StockTradingApp/ 2>/dev/null || echo "Core Data模型不存在"
+        cp user_input_files/StockTradingApp.swift StockTradingApp/ 2>/dev/null || echo "主应用文件不存在"
+        cp user_input_files/Info.plist StockTradingApp/Supporting\ Files/ 2>/dev/null || echo "Info.plist不存在"
+        
+        # 检查文件复制结果
+        echo "📋 检查复制的文件..."
+        find StockTradingApp -name "*.swift" | head -10
+        
+        echo "✅ 项目结构创建完成"
+        
+    - name: 生成Xcode项目文件
+      run: |
+        echo "🔧 生成Xcode项目配置..."
+        
+        # 创建Package.swift用于SPM依赖管理
+        cat > Package.swift << 'EOF'
+        // swift-tools-version:5.9
+        import PackageDescription
+        
+        let package = Package(
+            name: "StockTradingApp",
+            platforms: [
+                .iOS(.v15)
+            ],
+            products: [
+                .library(
+                    name: "StockTradingApp",
+                    targets: ["StockTradingApp"]),
+            ],
+            dependencies: [
+                // 添加常用依赖
+            ],
+            targets: [
+                .target(
+                    name: "StockTradingApp",
+                    dependencies: []),
+                .testTarget(
+                    name: "StockTradingAppTests",
+                    dependencies: ["StockTradingApp"]),
+            ]
+        )
+        EOF
+        
+        echo "✅ Package.swift创建完成"
+        
+    - name: 使用xcodegen生成项目
+      run: |
+        echo "📦 安装xcodegen..."
+        brew install xcodegen
+        
+        echo "🔧 创建project.yml配置..."
+        cat > project.yml << 'EOF'
+        name: StockTradingApp
+        
+        options:
+          bundleIdPrefix: com.stocktrading
+          deploymentTarget:
+            iOS: "15.0"
+          developmentLanguage: zh-Hans
+          
+        settings:
+          IPHONEOS_DEPLOYMENT_TARGET: 15.0
+          SWIFT_VERSION: 5.9
+          TARGETED_DEVICE_FAMILY: "1,2"
+          SUPPORTS_MACCATALYST: false
+          MARKETING_VERSION: "1.0.0"
+          CURRENT_PROJECT_VERSION: "1"
+          
+        targets:
+          StockTradingApp:
+            type: application
+            platform: iOS
+            deploymentTarget: "15.0"
+            sources:
+              - StockTradingApp
+            resources:
+              - StockTradingApp/Resources
+            info:
+              path: StockTradingApp/Supporting Files/Info.plist
+            settings:
+              PRODUCT_BUNDLE_IDENTIFIER: com.stocktrading.app
+              PRODUCT_NAME: StockTradingApp
+              INFOPLIST_FILE: StockTradingApp/Supporting Files/Info.plist
+              ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+              CODE_SIGN_STYLE: Manual
+              CODE_SIGN_IDENTITY: ""
+              PROVISIONING_PROFILE_SPECIFIER: ""
+              DEVELOPMENT_TEAM: ""
+            preBuildScripts:
+              - name: "检查源文件"
+                script: |
+                  echo "📋 检查项目源文件..."
+                  find "${SRCROOT}/StockTradingApp" -name "*.swift" | head -10
+            coreDataModels:
+              - StockTradingApp/TradingDataModel.xcdatamodeld
+        EOF
+        
+        echo "🚀 生成Xcode项目..."
+        xcodegen generate
+        
+        echo "✅ Xcode项目生成完成"
+        
+    - name: 解析和修复Swift代码依赖
+      run: |
+        echo "🔍 分析Swift代码依赖..."
+        
+        # 检查缺失的类和协议
+        grep -r "class.*:" StockTradingApp/ | head -10 || true
+        grep -r "protocol.*:" StockTradingApp/ | head -10 || true
+        
+        # 创建缺失的基础类
+        mkdir -p StockTradingApp/Foundation
+        
+        # 创建AppDelegate.swift
+        cat > StockTradingApp/Foundation/AppDelegate.swift << 'EOF'
+        import UIKit
+        import CoreData
+        
+        class AppDelegate: NSObject, UIApplicationDelegate {
+            func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+                return true
+            }
+            
+            func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+                completionHandler(.newData)
+            }
+        }
+        EOF
+        
+        # 创建AppState.swift
+        cat > StockTradingApp/Foundation/AppState.swift << 'EOF'
+        import Foundation
+        import Combine
+        
+        class AppState: ObservableObject {
+            @Published var isLoggedIn: Bool = false
+            @Published var currentUser: String = ""
+            @Published var theme: String = "light"
+            
+            init() {
+                // 初始化应用状态
+            }
+        }
+        EOF
+        
+        echo "✅ 基础类创建完成"
+        
+    - name: 清理构建并构建项目
+      run: |
+        echo "🧹 清理构建缓存..."
+        xcodebuild clean -project StockTradingApp.xcodeproj -scheme ${{ env.SCHEME_NAME }} -configuration ${{ env.CONFIGURATION }}
+        
+        echo "🔨 开始构建项目..."
+        xcodebuild build \
+          -project StockTradingApp.xcodeproj \
+          -scheme ${{ env.SCHEME_NAME }} \
+          -configuration ${{ env.CONFIGURATION }} \
+          -destination 'generic/platform=iOS' \
+          -allowProvisioningUpdates \
+          CODE_SIGN_IDENTITY="" \
+          CODE_SIGNING_REQUIRED=NO \
+          CODE_SIGNING_ALLOWED=NO
+          
+    - name: 创建归档
+      run: |
+        echo "📦 创建应用归档..."
+        xcodebuild archive \
+          -project StockTradingApp.xcodeproj \
+          -scheme ${{ env.SCHEME_NAME }} \
+          -configuration ${{ env.CONFIGURATION }} \
+          -destination 'generic/platform=iOS' \
+          -archivePath build/StockTradingApp.xcarchive \
+          -allowProvisioningUpdates \
+          CODE_SIGN_IDENTITY="" \
+          CODE_SIGNING_REQUIRED=NO \
+          CODE_SIGNING_ALLOWED=NO
+          
+    - name: 导出未签名IPA
+      run: |
+        echo "📱 导出未签名IPA包..."
+        
+        # 创建导出选项plist
+        cat > ExportOptions.plist << 'EOF'
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>method</key>
+            <string>development</string>
+            <key>compileBitcode</key>
+            <false/>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>stripSwiftSymbols</key>
+            <true/>
+            <key>thinning</key>
+            <string>&lt;none&gt;</string>
+        </dict>
+        </plist>
+        EOF
+        
+        # 导出IPA
+        xcodebuild -exportArchive \
+          -archivePath build/StockTradingApp.xcarchive \
+          -exportPath build/ipa \
+          -exportOptionsPlist ExportOptions.plist \
+          -allowProvisioningUpdates
+          
+    - name: 重命名和准备发布文件
+      run: |
+        echo "📋 准备发布文件..."
+        
+        # 获取构建信息
+        BUILD_DATE=$(date "+%Y%m%d_%H%M%S")
+        COMMIT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+        
+        # 重命名IPA文件
+        if [ -f "build/ipa/StockTradingApp.ipa" ]; then
+          mv "build/ipa/StockTradingApp.ipa" "build/StockTradingApp_${BUILD_DATE}_${COMMIT_SHA}_unsigned.ipa"
+          echo "✅ IPA文件重命名完成"
+        else
+          echo "❌ 未找到IPA文件，检查构建过程"
+          ls -la build/ipa/ || true
+          exit 1
+        fi
+        
+        # 创建构建信息文件
+        cat > build/build_info.txt << EOF
+        构建信息
+        ========
+        应用名称: 股票交易系统
+        版本: 1.0.0 (1)
+        构建配置: ${{ env.CONFIGURATION }}
+        构建时间: ${BUILD_DATE}
+        提交哈希: ${{ github.sha }}
+        分支: ${{ github.ref_name }}
+        构建环境: GitHub Actions (macOS-14)
+        Xcode版本: ${{ env.XCODE_VERSION }}
+        iOS目标版本: ${{ env.IOS_DEPLOYMENT_TARGET }}
+        
+        ⚠️  注意事项:
+        - 此为未签名的IPA包
+        - 需要开发者证书才能安装到真机
+        - 可用于模拟器测试或重新签名
+        
+        📦 安装说明:
+        1. 使用Xcode安装到模拟器
+        2. 使用第三方工具重新签名后安装
+        3. 企业环境可配置企业证书签名
+        EOF
+        
+    - name: 上传构建产物
+      uses: actions/upload-artifact@v4
+      with:
+        name: StockTradingApp-unsigned-ipa-${{ github.run_number }}
+        path: |
+          build/*.ipa
+          build/build_info.txt
+        retention-days: 30
+        
+    - name: 构建摘要
+      run: |
+        echo "## 🎉 构建完成" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📋 构建信息" >> $GITHUB_STEP_SUMMARY
+        echo "- **应用名称**: 股票交易系统" >> $GITHUB_STEP_SUMMARY
+        echo "- **版本**: 1.0.0 (1)" >> $GITHUB_STEP_SUMMARY
+        echo "- **构建配置**: ${{ env.CONFIGURATION }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **目标iOS版本**: ${{ env.IOS_DEPLOYMENT_TARGET }}+" >> $GITHUB_STEP_SUMMARY
+        echo "- **构建时间**: $(date)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📦 产物下载" >> $GITHUB_STEP_SUMMARY
+        echo "请在Actions页面下载 \`StockTradingApp-unsigned-ipa-${{ github.run_number }}\` 文件" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### ⚠️ 重要说明" >> $GITHUB_STEP_SUMMARY
+        echo "- 此IPA包**未经签名**，无法直接安装到iOS设备" >> $GITHUB_STEP_SUMMARY
+        echo "- 适用于模拟器测试或后续重新签名" >> $GITHUB_STEP_SUMMARY
+        echo "- 如需真机安装，请使用开发者证书重新签名" >> $GITHUB_STEP_SUMMARY
+
+  # 可选: 自动创建Release (仅在main分支)
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+    - name: 下载构建产物
+      uses: actions/download-artifact@v4
+      with:
+        name: StockTradingApp-unsigned-ipa-${{ github.run_number }}
+        path: ./artifacts
+        
+    - name: 创建Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v1.0.0-build.${{ github.run_number }}
+        name: iOS股票交易系统 v1.0.0 Build ${{ github.run_number }}
+        body: |
+          ## 📱 iOS股票交易系统 未签名版本
+          
+          **构建时间**: ${{ github.event.head_commit.timestamp }}
+          **提交信息**: ${{ github.event.head_commit.message }}
+          
+          ### 📋 功能特性
+          - 实时股票数据显示
+          - 多策略交易系统  
+          - K线图表分析
+          - 风险管理系统
+          - 投资组合管理
+          
+          ### 📦 安装说明
+          1. 下载 `.ipa` 文件
+          2. 使用Xcode安装到iOS模拟器测试
+          3. 如需真机安装，请重新签名或联系开发者
+          
+          ### ⚠️ 重要提醒
+          - 此为**未签名**版本，仅供开发测试
+          - 不包含有效的开发者证书
+          - 无法直接安装到iOS真机设备
+          
+        files: ./artifacts/*
+        draft: false
+        prerelease: true
+        generate_release_notes: true

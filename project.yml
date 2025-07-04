@@ -1,0 +1,80 @@
+name: StockTradingApp
+
+options:
+  bundleIdPrefix: com.stocktrading
+  deploymentTarget:
+    iOS: "15.0"
+  developmentLanguage: zh-Hans
+  createIntermediateGroups: true
+  
+settings:
+  IPHONEOS_DEPLOYMENT_TARGET: 15.0
+  SWIFT_VERSION: 5.9
+  TARGETED_DEVICE_FAMILY: "1,2"
+  SUPPORTS_MACCATALYST: false
+  MARKETING_VERSION: "1.0.0"
+  CURRENT_PROJECT_VERSION: "1"
+  DEVELOPMENT_LANGUAGE: zh-Hans
+  
+targets:
+  StockTradingApp:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: .
+        excludes:
+          - "**/*.md"
+          - "docs/**"
+          - ".github/**"
+          - "browser/**"
+          - "download/**"
+          - "user_input_files/ios.zip"
+          - "*.yml"
+          - "*.yaml"
+          - "Package.swift"
+          - ".gitignore"
+      - path: user_input_files
+        excludes:
+          - "ios.zip"
+          - "StockTradingApp.xcodeproj/**"
+        name: StockTradingApp
+    resources:
+      - user_input_files/TradingDataModel.xcdatamodeld
+    info:
+      path: user_input_files/Info.plist
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.stocktrading.app
+      PRODUCT_NAME: StockTradingApp
+      INFOPLIST_FILE: user_input_files/Info.plist
+      ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      CODE_SIGN_STYLE: Manual
+      CODE_SIGN_IDENTITY: ""
+      PROVISIONING_PROFILE_SPECIFIER: ""
+      DEVELOPMENT_TEAM: ""
+      ENABLE_BITCODE: true
+      SWIFT_OPTIMIZATION_LEVEL: "-O"
+      SWIFT_COMPILATION_MODE: wholemodule
+    preBuildScripts:
+      - name: "检查源文件"
+        script: |
+          echo "📋 检查项目源文件..."
+          find "${SRCROOT}" -name "*.swift" | grep -E "(StockTradingApp|Models|Views|Services|Utils|Performance)" | head -10
+    coreDataModels:
+      - user_input_files/TradingDataModel.xcdatamodeld
+
+schemes:
+  StockTradingApp:
+    build:
+      targets:
+        StockTradingApp: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
